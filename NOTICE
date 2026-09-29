@@ -1,0 +1,21 @@
+Which Era Are You?
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This project was generated with, and follows the methodology of, Niobium's
+FHE Application Design skill ("FHEanna"), Copyright (c) 2026 Niobium
+Microsystems, Inc., licensed under the Apache License, Version 2.0.
+Patent pending: one or more patent applications covering the methodology
+implemented by that skill have been filed by Niobium Microsystems, Inc.
+
+It builds against niobium-client (https://github.com/NiobiumInc/niobium-client),
+licensed under the Apache License, Version 2.0, which includes Niobium's
+instrumented fork of OpenFHE (BSD 2-Clause License, Copyright (c) 2022, OpenFHE).
+Neither is included in this repository.
+
+Fonts in web/fonts/ (SIL Open Font License, Version 1.1; license texts included there):
+  Archivo         Copyright 2020 The Archivo Project Authors
+  JetBrains Mono  Copyright 2020 The JetBrains Mono Project Authors
+
+Fan-made and unaffiliated with Taylor Swift or her team. Album and era names
+are used as quiz categories only. Names of albums, products and companies
+belong to their respective owners.
