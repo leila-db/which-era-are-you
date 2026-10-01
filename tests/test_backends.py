@@ -113,6 +113,37 @@ class FogPreflight(unittest.TestCase):
             self.assertTrue(any("fog" in w for w, _ in cm.exception.problems))
 
 
+class LoadCheck(unittest.TestCase):
+    """preflight runs era_server once with no arguments. A binary that cannot load its libraries fails
+    there (dyld / ld.so), and the message must say so and name the fix."""
+
+    def _fake_server(self, d, script):
+        path = os.path.join(d, "era_server")
+        with open(path, "w") as f:
+            f.write("#!/bin/sh\n" + script)
+        os.chmod(path, 0o700)
+
+    def test_usage_exit_passes(self):
+        with tempfile.TemporaryDirectory() as d:
+            self._fake_server(d, 'echo "usage: era_server <server_home>" >&2; exit 2\n')
+            backends.get("cpu", d).preflight()                  # no raise
+
+    def test_loader_failure_is_reported_with_the_fix(self):
+        with tempfile.TemporaryDirectory() as d:
+            self._fake_server(d, 'echo "dyld[1]: Symbol not found: _foo" >&2; kill -ABRT $$\n')
+            with self.assertRaises(backends.BackendUnavailable) as cm:
+                backends.get("cpu", d).preflight()
+            text = " ".join(w + " " + f for w, f in cm.exception.problems)
+            self.assertIn("Symbol not found", text)
+            self.assertIn("./build.sh", text)
+
+    def test_not_built_is_reported(self):
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaises(backends.BackendUnavailable) as cm:
+                backends.get("cpu", d).preflight()
+            self.assertIn("not built", cm.exception.problems[0][0])
+
+
 class UiIsBackendAgnostic(unittest.TestCase):
     def test_web_ui_never_branches_on_a_backend_id(self):
         with open(os.path.join(ROOT, "web", "app.js")) as f:

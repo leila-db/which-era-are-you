@@ -11,7 +11,37 @@ fi
 [ -d "$NC/vendor/lib/niobium-client" ] || { echo "niobium-client SDK not found at $NC; set NIOBIUM_CLIENT_DIR"; exit 1; }
 echo "using niobium-client at $NC"
 GEN=(); command -v ninja >/dev/null && GEN=(-G Ninja)
+# Only niobium-client's own OpenFHE (the instrumented fork it builds alongside libnbfhetch) may be used. Any
+# other OpenFHE on CMake's default search path is not ABI-compatible with libnbfhetch, so pin both package
+# dirs to niobium-client and refuse anything else.
 cmake -S "$ROOT/app" -B "$ROOT/build" ${GEN[@]+"${GEN[@]}"} -DCMAKE_BUILD_TYPE=Release \
-      -DCMAKE_PREFIX_PATH="$NC/vendor/lib/niobium-client;$NC/vendor/lib/openfhe"
+      -DCMAKE_PREFIX_PATH="$NC/vendor/lib/niobium-client;$NC/vendor/lib/openfhe" \
+      -DNiobiumFhetch_DIR="$NC/vendor/lib/niobium-client/lib/cmake/NiobiumFhetch" \
+      -DOpenFHE_DIR="$NC/vendor/lib/openfhe/lib/OpenFHE"
+for var in OpenFHE_DIR NiobiumFhetch_DIR; do
+  got=$(sed -n "s/^$var:[A-Z]*=//p" "$ROOT/build/CMakeCache.txt")
+  case "$got" in "$NC"/*) ;; *) echo "$var resolved to '$got', not under $NC. Refusing to build against a foreign OpenFHE."; exit 1;; esac
+done
 cmake --build "$ROOT/build" -j"${BUILD_JOBS:-2}"
+# Smoke test: the programs must load their shared libraries. A libnbfhetch and OpenFHE that do not match
+# fail here with a dyld / ld.so "Symbol not found" error instead of later, when the demo makes its keys.
+out=$("$ROOT/build/era_keygen" 2>&1) && rc=0 || rc=$?
+if [ "$rc" -ne 2 ]; then
+  echo "built, but era_keygen does not start (exit $rc):"; printf '%s\n' "$out" | head -4
+  echo "Rebuild niobium-client at $NC (make release && make install-release), then rm -rf build && ./build.sh"
+  exit 1
+fi
+# And at run time the loader must resolve every OpenFHE / libnbfhetch library from $NC, never from elsewhere.
+if [ "$(uname -s)" = Darwin ]; then
+  # (era_keygen exits 2 here, so swallow its status: with pipefail that would otherwise abort the script)
+  loaded=$( (DYLD_PRINT_LIBRARIES=1 "$ROOT/build/era_keygen" 2>&1 || true) | grep -E "OPENFHE|nbfhetch" | sed 's/^dyld\[[0-9]*\]: //' || true)
+else
+  loaded=$(ldd "$ROOT/build/era_keygen" | grep -E "OPENFHE|nbfhetch" | awk '{print $3}' || true)
+fi
+foreign=$(printf '%s\n' "$loaded" | grep -v "$NC/" || true)
+if [ -n "$foreign" ]; then
+  echo "era_keygen loads libraries from outside $NC:"; printf '%s\n' "$foreign"
+  echo "Only niobium-client's own OpenFHE may be used. Unset DYLD_LIBRARY_PATH / LD_LIBRARY_PATH and rebuild."
+  exit 1
+fi
 echo "built: $(ls "$ROOT"/build/era_* | xargs -n1 basename | tr '\n' ' ')"

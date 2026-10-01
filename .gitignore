@@ -13,8 +13,9 @@ nbcc_fhetch_replay_source_*/
 .fog/
 .env
 .env.*
-# logs, Python and macOS clutter
+# logs, Python, editor and macOS clutter
 *.log
+.vscode/
 __pycache__/
 .venv/
 .DS_Store
