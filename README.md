@@ -66,7 +66,25 @@ That runs, in order:
 
 ### The Fog
 
-**FOG.md** covers running on the Fog: logging in, what each quiz sends, the transport timing on the result page, and what the `fog` errors mean. `make fog-ready` checks the prerequisites without contacting anything.
+Running on the Fog needs a Fog account and an API key on this computer. Nothing else in the demo does.
+
+1. **Request a Fog account:** https://console.niobium.co/request-account. Niobium approves it and you get a console login.
+2. **Install the `fog` CLI** if it isn't on your PATH yet. In the niobium-client checkout, `make install-cli` puts `fog` and `nbcc_fhetch_replay` in `~/.local/bin`.
+3. **Create the API key** by logging in once with your console email. This writes the key to `~/.fog/credentials` (owner-only):
+   ```bash
+   fog login -u <your Niobium console email>
+   fog list                       # confirms the key works; prints your jobs (none at first)
+   ```
+   Prefer not to keep a file? `export FOG_API_TOKEN=$(fog login -u <email>)` works too, and `FOG_HOME=<dir>` moves the credentials folder.
+4. **Check readiness without contacting the Fog**, then run:
+   ```bash
+   make fog-ready
+   ./start_local.sh fog
+   ```
+
+Without a key, `./start_local.sh fog` and `make fog-ready` stop before making any keys and print what is missing, the `fog login` command, and the sign-up link. `./run_test.sh` with no flag prints the same and exits 0 without dispatching anything, so look for its `PASS` line.
+
+**FOG.md** covers the rest: what each quiz sends, the transport timing on the result page, the Fog settings, and what the `fog` errors mean.
 
 ## What's in here
 

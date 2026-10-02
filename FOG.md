@@ -31,8 +31,10 @@ fog submit build/era_server <job dir> --hollow --target=$FOG_TARGET
 
 ## Setting up
 
+You need a Fog account and an API key on this computer (the README has the same steps).
+
 1. **Get a Fog account** (only if you don't have one): https://console.niobium.co/request-account
-2. **Log in once.** This stores an API key in `~/.fog/credentials`:
+2. **Log in once.** This creates an API key and stores it in `~/.fog/credentials`, or use `FOG_API_TOKEN`:
    ```bash
    fog login -u <your Niobium console email>
    fog list
