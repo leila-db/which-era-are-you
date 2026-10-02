@@ -84,6 +84,7 @@ int main(int argc, char* argv[]) {
 
     Ciphertext<DCRTPoly> result;
     std::string mode;
+    double replayMs = -1;            // time inside replay(): for the Fog, upload + remote run + download
     if (cpu) {
         mode = "cpu";
         result = run_circuit(cc, query, eras);
@@ -113,7 +114,12 @@ int main(int argc, char* argv[]) {
             niobium::compiler().enable_hollow_mode(false);
             if (!hollow) recorded = out;
         }
+        auto r0 = std::chrono::steady_clock::now();
         if (!niobium::compiler().replay()) { std::cerr << "[server] replay failed\n"; return 1; }
+        replayMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - r0).count();
+        // Printed as soon as replay() returns: the compute service timestamps this line to split the
+        // Fog's upload from its run + download (services/backends.py, FogBackend.parse).
+        std::cerr << "[server] replay done in " << replayMs << " ms\n";
         if (!niobium::compiler().result(cc, "scores", result)) {
             std::cerr << "[server] could not read replayed result\n";
             return 1;
@@ -126,11 +132,18 @@ int main(int argc, char* argv[]) {
         mode += hollow ? "-hollow" : "-real";
     }
 
+    // run_circuit() ends with Compress(y, 1), so the result that travels back (from the Fog and then to
+    // the client) carries a single RNS tower. Report the tower count so the UI and tests can see it.
+    const auto towersOut = result->GetElements().at(0).GetNumOfElements();
     save(join(home, kCtOut), result);
     double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
     auto outBytes = std::filesystem::file_size(join(home, kCtOut));
-    std::cerr << "[server] returned " << outBytes << " bytes, still encrypted\n";
+    std::cerr << "[server] returned " << outBytes << " bytes, still encrypted (compressed to "
+              << towersOut << " RNS tower" << (towersOut == 1 ? "" : "s") << ")\n";
     std::cout << "{\"mode\":\"" << mode << "\",\"ms\":" << ms << ",\"bytes_out\":" << outBytes
-              << ",\"ring_dim\":" << cc->GetRingDimension() << "}" << std::endl;
+              << ",\"ring_dim\":" << cc->GetRingDimension() << ",\"towers_out\":" << towersOut
+              << ",\"replay_ms\":";
+    if (replayMs < 0) std::cout << "null"; else std::cout << replayMs;
+    std::cout << "}" << std::endl;
     return 0;
 }

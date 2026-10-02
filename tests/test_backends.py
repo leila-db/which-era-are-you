@@ -44,6 +44,23 @@ class Commands(unittest.TestCase):
     def test_fog_never_bypasses_ring_dim_guard(self):
         self.assertNotIn("--no-ring-dim-check", backends.get("fog", BUILD).command("/j"))
 
+    def test_hollow_backends_pass_hollow_and_only_they_do(self):
+        """The Fog (and its local rehearsal, sim) must record WITHOUT real math: --hollow on the command
+        line, and `hollow = True` so the compute service can check era_server's reported mode."""
+        for name in backends.BACKENDS:
+            b = backends.get(name, BUILD)
+            self.assertEqual("--hollow" in b.command("/j"), b.hollow, name)
+        self.assertTrue(backends.get("fog", BUILD).hollow)
+        self.assertTrue(backends.get("sim", BUILD).hollow)
+        self.assertFalse(backends.get("sim-full", BUILD).hollow, "sim-full needs real math for the ring check")
+        self.assertFalse(backends.get("cpu", BUILD).hollow)
+
+    def test_every_remote_backend_is_hollow(self):
+        for name in backends.BACKENDS:
+            b = backends.get(name, BUILD)
+            if b.remote:
+                self.assertTrue(b.hollow, f"{name} sends a trace off this machine; it must be hollow")
+
     def test_unknown_backend(self):
         with self.assertRaises(ValueError):
             backends.get("gpu", BUILD)
@@ -69,6 +86,43 @@ class Parse(unittest.TestCase):
         # Line format from niobium-client scripts/fog: print(f"[fog] assigned {jid} -> {server}")
         err = "[fog] queued as j-123; long-polling for a worker…\n[fog] assigned j-123 -> https://w/jobs/j-123/run\n"
         self.assertEqual(backends.get("fog", BUILD).parse("", err)["fog_job"], "j-123")
+
+    def test_local_backends_report_no_transport(self):
+        for name in ("cpu", "sim", "sim-full"):
+            self.assertIsNone(backends.get(name, BUILD).parse("", "")["transport_ms"], name)
+
+    # A Fog run as the compute service sees it: (ms since launch, stderr line). Line formats from
+    # niobium-client scripts/fog, src/fhetch_transport/client.cpp and app/server.cpp.
+    FOG_TIMELINE = [
+        (5, "[fog] POST https://api.niobium.co/jobs/ {mode:batch, target:FOG}"),
+        (1200, "[fog] assigned j-123 -> https://w/jobs/j-123/run"),
+        (1201, "[fog] exec /b/era_server /j --hollow --target=FOG"),
+        (2500, "[server] received 2098221 bytes of ciphertext (no key to open it)"),
+        (3000, "[fog] upload 0/20 MB (0%)"),
+        (6000, "[fog] upload 10/20 MB (50%)"),
+        (9000, "[fog] upload 20/20 MB (100%)"),
+        (9001, "[fog] upload complete — replaying on target FOG, waiting for the server"),
+        (13500, "[server] replay done in 10500.2 ms"),
+        (13600, "[server] returned 1049627 bytes, still encrypted (compressed to 1 RNS tower)"),
+    ]
+    FOG_STDOUT = "[nbcc_fhetch_replay] POSTing 20971520 bytes (streamed, project=x, target=FOG) → https://w/jobs/j-123/run\n"
+
+    def test_fog_transport_timing_from_the_timeline(self):
+        meta = backends.get("fog", BUILD).parse(self.FOG_STDOUT, "\n".join(l for _, l in self.FOG_TIMELINE), self.FOG_TIMELINE)
+        self.assertEqual(meta["fog_job"], "j-123")
+        self.assertEqual(meta["fog_queue_ms"], 1200)
+        self.assertEqual(meta["upload_ms"], 6001)            # first progress line -> "upload complete"
+        self.assertEqual(meta["upload_bytes"], 20971520)
+        self.assertEqual(meta["fog_wait_ms"], 4499)          # "upload complete" -> replay() returned
+        self.assertEqual(meta["transport_ms"], meta["upload_ms"])
+        self.assertIsNone(meta["download_ms"], "the transport client reports upload progress only")
+
+    def test_fog_timing_degrades_to_none_when_lines_are_missing(self):
+        meta = backends.get("fog", BUILD).parse("", "[fog] assigned j-1 -> u\n", [(10, "[fog] assigned j-1 -> u")])
+        self.assertEqual(meta["fog_job"], "j-1")
+        self.assertEqual(meta["fog_queue_ms"], 10)
+        for k in ("upload_ms", "upload_bytes", "fog_wait_ms", "transport_ms", "download_ms"):
+            self.assertIsNone(meta[k], k)
 
     def test_ring_check_detected(self):
         err = "[server] ring-level identity check: replay == OpenFHE, bit for bit\n"

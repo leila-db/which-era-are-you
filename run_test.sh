@@ -65,7 +65,7 @@ fi
 rm -f "$SERVER/sk.bin"; echo "negative test: server refused a planted secret key"
 
 # 4. Fog mode: preflight for an API key; with a key present the `fog submit` dispatch below is mandatory
-if [ "$MODE" = "fog" ] && [ ! -f "$HOME/.fog/credentials" ] && [ -z "${FOG_API_TOKEN:-}" ]; then
+if [ "$MODE" = "fog" ] && [ ! -f "${FOG_HOME:-$HOME/.fog}/credentials" ] && [ -z "${FOG_API_TOKEN:-}" ]; then
   echo "No Fog API key found, so nothing was dispatched."
   echo "  Sign in:  fog login        Sign up:  https://console.niobium.co/request-account"
   echo "  Account-free local validation:  ./run_test.sh --sim"

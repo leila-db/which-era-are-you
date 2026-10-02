@@ -3,7 +3,7 @@
 A fan-made Taylor Swift personality quiz that is scored **without ever being decrypted**. Your twelve answers are encrypted on your computer, scored as ciphertext against twelve era profiles, and only unlocked back on your computer.
 
 - Real CKKS fully homomorphic encryption (OpenFHE, Niobium's instrumented build), ring size 2^16
-- Scored locally on plain OpenFHE or on Niobium's FHETCH simulator. A Niobium Fog backend exists in the code but has **not** been tested on the Fog.
+- Scored on the Niobium Fog, on Niobium's FHETCH simulator, or on plain OpenFHE on this computer
 - A built-in "proof" view shows the actual ciphertext bytes and the scoring service's own log
 
 Fan-made and unaffiliated with Taylor Swift or her team. Album and era names are used as quiz categories only.
@@ -41,7 +41,7 @@ Keep the project out of cloud-synced folders (for example an iCloud Desktop or D
 | `./start_local.sh sim` | Niobium's FHETCH simulator on this computer (default; a local rehearsal of a Fog run) |
 | `./start_local.sh sim-full` | The simulator with a real-math record, plus a bit-for-bit check against plain OpenFHE on every quiz |
 | `./start_local.sh cpu` | Plain OpenFHE on this computer's CPU |
-| `./start_local.sh fog` | The Niobium Fog. Not verified yet; see **FOG.md** |
+| `./start_local.sh fog` | The Niobium Fog (needs `fog login`; see **FOG.md**) |
 
 The page always says which one produced your result. Only `services/backends.py` knows the difference, and the quiz, encryption and UI are identical in every mode. Port taken? `PORT=8010 COMPUTE_PORT=8011 ./start_local.sh sim`.
 
@@ -66,7 +66,25 @@ That runs, in order:
 
 ### The Fog
 
-Deliberately left for last. **FOG.md** has the full switch-over checklist, what still needs verifying, and what access to ask Niobium for. `make fog-ready` checks the prerequisites without contacting anything.
+Running on the Fog needs a Fog account and an API key on this computer. Nothing else in the demo does.
+
+1. **Request a Fog account:** https://console.niobium.co/request-account. Niobium approves it and you get a console login.
+2. **Install the `fog` CLI** if it isn't on your PATH yet. In the niobium-client checkout, `make install-cli` puts `fog` and `nbcc_fhetch_replay` in `~/.local/bin`.
+3. **Create the API key** by logging in once with your console email. This writes the key to `~/.fog/credentials` (owner-only):
+   ```bash
+   fog login -u <your Niobium console email>
+   fog list                       # confirms the key works; prints your jobs (none at first)
+   ```
+   Prefer not to keep a file? `export FOG_API_TOKEN=$(fog login -u <email>)` works too, and `FOG_HOME=<dir>` moves the credentials folder.
+4. **Check readiness without contacting the Fog**, then run:
+   ```bash
+   make fog-ready
+   ./start_local.sh fog
+   ```
+
+Without a key, `./start_local.sh fog` and `make fog-ready` stop before making any keys and print what is missing, the `fog login` command, and the sign-up link. `./run_test.sh` with no flag prints the same and exits 0 without dispatching anything, so look for its `PASS` line.
+
+**FOG.md** covers the rest: what each quiz sends, the transport timing on the result page, the Fog settings, and what the `fog` errors mean.
 
 ## What's in here
 
@@ -82,7 +100,7 @@ services/
   compute_service.py  the untrusted scoring side: holds no secret key; logs only sizes, timing and a shortened session ID
   backends.py         WHERE the encrypted math runs (cpu / sim / sim-full / fog); the only mode-aware code
 tests/              backend unit tests + live two-process service test (make check)
-FOG.md              the Fog switch-over: checklist, open questions, access to request
+FOG.md              running on the Fog: login, what leaves this computer, timings, error reference
 web/            the quiz UI (plain HTML/CSS/JS) and its locally served fonts (web/fonts, SIL OFL 1.1)
 data/quiz.json  traits, questions, answer weights, era profiles (single source of truth)
 data/eras.csv   the server's plaintext model, exported by tools/twin.py

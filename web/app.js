@@ -28,6 +28,21 @@ const mb = (n) => (n / 1e6).toFixed(2) + " MB";
 const pct = (s) => Math.round(50 * (1 + s));
 const pct2 = (s) => (50 * (1 + s)).toFixed(2);
 const hexOf = (ct, n) => ct.hex.slice(0, n * 2).match(/.{2}/g).join(" ");
+const secs = (ms) => (ms >= 10000 ? (ms / 1000).toFixed(1) + " s" : Math.round(ms).toLocaleString() + " ms");
+
+// Transport = time spent moving ciphertext to and from remote hardware (the compute service measures it,
+// services/backends.py). A local run never moves it, so transport_ms is null and we say n/a.
+function transportShort(meta) {
+  return meta.transport_ms == null ? "n/a" : secs(meta.transport_ms);
+}
+function transportLong(meta) {
+  if (meta.transport_ms == null) return "n/a: the encrypted data never left this computer.";
+  const parts = [`upload ${secs(meta.upload_ms)}` + (meta.upload_bytes ? ` (${mb(meta.upload_bytes)}: the trace, your encrypted answers and the rotation keys)` : "")];
+  if (meta.download_ms != null) parts.push(`download ${secs(meta.download_ms)}`);
+  else if (meta.fog_wait_ms != null) parts.push(`remote run plus download ${secs(meta.fog_wait_ms)}`);
+  if (meta.fog_queue_ms != null) parts.push(`job queue ${secs(meta.fog_queue_ms)}`);
+  return parts.join("; ") + ".";
+}
 
 function show(id) {
   document.querySelectorAll(".screen").forEach((s) => s.classList.toggle("active", s.id === id));
@@ -171,7 +186,7 @@ async function runScoring() {
       strip.classList.remove("running");
     }
     strip.classList.add("done");
-    step(2, "done", `all 12 scored in ${comp.meta.server_ms} ms, still encrypted`);
+    step(2, "done", `all 12 scored in ${comp.meta.server_ms} ms, still encrypted (transport ${transportShort(comp.meta)})`);
     const log = await api("/api/server-log").catch(() => ({ lines: [], first: 0 }));
     const lines = log.lines.filter((_, k) => (log.first || 0) + k > since);
     await sleep(500);
@@ -258,7 +273,7 @@ function renderProof(enc, comp, dec, lines) {
   $("#badge").className = b.remote ? "badge-remote" : "";
   $("#serverlog").textContent = lines.length ? lines.join("\n") : "(log unavailable)";
   $("#downhex").textContent = hexOf(down, 192);
-  $("#downmeta").innerHTML = `<span>${mb(down.bytes)}</span><span>server time ${comp.meta.server_ms} ms</span><a href="/api/ciphertext/${enc.job}/result">download all of it</a>`;
+  $("#downmeta").innerHTML = `<span>${mb(down.bytes)}</span><span>server time ${comp.meta.server_ms} ms</span><span>transport ${esc(transportShort(comp.meta))}</span><a href="/api/ciphertext/${enc.job}/result">download all of it</a>`;
 
   $("#unlock").textContent = `The local helper on this computer unlocked all 12 scores with the secret key in ${dec.decrypt_ms} ms and picked the highest one itself. ` +
     "The scoring service only ever received encrypted data, never your answers, your scores, or your era.";
@@ -275,6 +290,11 @@ function renderProof(enc, comp, dec, lines) {
     ["Secret key", `${mb(k.sk_bytes)}, kept by the local helper (owner-only file); never sent to the scoring service`],
     ["Key lifetime", "one key pair, generated when the demo started and shared by every quiz until it restarts"],
     ["Where the math ran", `${comp.meta.backend.name}. ${comp.meta.backend.detail}`],
+    ["Timing", `scoring service ${comp.meta.server_ms.toLocaleString()} ms end to end` +
+      (comp.meta.replay_ms != null ? `, of which the recorded circuit's replay took ${secs(comp.meta.replay_ms)}` : "") +
+      `; encrypt ${enc.encrypt_ms} ms and decrypt ${dec.decrypt_ms} ms on this computer`],
+    ["Transport", transportLong(comp.meta)],
+    ["Result size", `${mb(comp.ciphertext.bytes)}${comp.meta.towers_out ? `, compressed to ${comp.meta.towers_out} RNS tower${comp.meta.towers_out === 1 ? "" : "s"} before it was sent back` : ""}`],
     ["Scoring service", STATUS.compute_url],
     ["Decryption precision", dec.precision_bits ? `about ${Math.round(dec.precision_bits)} bits` : "n/a"],
   ];
