@@ -17,6 +17,7 @@ To add or switch a backend, change this file only. See FOG.md for running on the
 import os
 import re
 import shutil
+import subprocess
 
 RING_CHECK_MARK = "ring-level identity check: replay == OpenFHE"
 
@@ -41,6 +42,19 @@ class Backend:
         """Raise BackendUnavailable if this backend can't run. Must not contact any network service."""
         if not os.access(self.server, os.X_OK):
             raise BackendUnavailable([(f"{self.server} is not built", "run ./build.sh")])
+        self.check_loads()
+
+    def check_loads(self):
+        """Run era_server once with no arguments: it must load its shared libraries and print its usage
+        (exit 2). A libnbfhetch and OpenFHE that do not match die right here with a dyld / ld.so
+        "Symbol not found" error, before the demo makes any keys."""
+        try:
+            r = subprocess.run([self.server], capture_output=True, text=True, timeout=60)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            raise BackendUnavailable([(f"{self.server} could not be started ({e})", "run ./build.sh")]) from None
+        if r.returncode != 2:
+            why = re.sub(r"\s+", " ", r.stderr).strip()[:400] or f"exit code {r.returncode}"
+            raise BackendUnavailable([(f"{self.server} does not start: {why}", "run ./build.sh")])
 
     def command(self, job_dir):
         raise NotImplementedError
