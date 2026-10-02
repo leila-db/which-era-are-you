@@ -39,7 +39,7 @@ function transportLong(meta) {
   if (meta.transport_ms == null) return "n/a: the encrypted data never left this computer.";
   const parts = [`upload ${secs(meta.upload_ms)}` + (meta.upload_bytes ? ` (${mb(meta.upload_bytes)}: the trace, your encrypted answers and the rotation keys)` : "")];
   if (meta.download_ms != null) parts.push(`download ${secs(meta.download_ms)}`);
-  else if (meta.fog_wait_ms != null) parts.push(`remote run plus download ${secs(meta.fog_wait_ms)} (the transport client doesn't yet split the download out)`);
+  else if (meta.fog_wait_ms != null) parts.push(`remote run plus download ${secs(meta.fog_wait_ms)}`);
   if (meta.fog_queue_ms != null) parts.push(`job queue ${secs(meta.fog_queue_ms)}`);
   return parts.join("; ") + ".";
 }

@@ -3,7 +3,7 @@
 A fan-made Taylor Swift personality quiz that is scored **without ever being decrypted**. Your twelve answers are encrypted on your computer, scored as ciphertext against twelve era profiles, and only unlocked back on your computer.
 
 - Real CKKS fully homomorphic encryption (OpenFHE, Niobium's instrumented build), ring size 2^16
-- Scored locally on plain OpenFHE or on Niobium's FHETCH simulator. A Niobium Fog backend exists in the code but has **not** been tested on the Fog.
+- Scored on the Niobium Fog, on Niobium's FHETCH simulator, or on plain OpenFHE on this computer
 - A built-in "proof" view shows the actual ciphertext bytes and the scoring service's own log
 
 Fan-made and unaffiliated with Taylor Swift or her team. Album and era names are used as quiz categories only.
@@ -41,7 +41,7 @@ Keep the project out of cloud-synced folders (for example an iCloud Desktop or D
 | `./start_local.sh sim` | Niobium's FHETCH simulator on this computer (default; a local rehearsal of a Fog run) |
 | `./start_local.sh sim-full` | The simulator with a real-math record, plus a bit-for-bit check against plain OpenFHE on every quiz |
 | `./start_local.sh cpu` | Plain OpenFHE on this computer's CPU |
-| `./start_local.sh fog` | The Niobium Fog. Not verified yet; see **FOG.md** |
+| `./start_local.sh fog` | The Niobium Fog (needs `fog login`; see **FOG.md**) |
 
 The page always says which one produced your result. Only `services/backends.py` knows the difference, and the quiz, encryption and UI are identical in every mode. Port taken? `PORT=8010 COMPUTE_PORT=8011 ./start_local.sh sim`.
 
@@ -66,7 +66,7 @@ That runs, in order:
 
 ### The Fog
 
-Deliberately left for last. **FOG.md** has the full switch-over checklist, what still needs verifying, and what access to ask Niobium for. `make fog-ready` checks the prerequisites without contacting anything.
+**FOG.md** covers running on the Fog: logging in, what each quiz sends, the transport timing on the result page, and what the `fog` errors mean. `make fog-ready` checks the prerequisites without contacting anything.
 
 ## What's in here
 
@@ -82,7 +82,7 @@ services/
   compute_service.py  the untrusted scoring side: holds no secret key; logs only sizes, timing and a shortened session ID
   backends.py         WHERE the encrypted math runs (cpu / sim / sim-full / fog); the only mode-aware code
 tests/              backend unit tests + live two-process service test (make check)
-FOG.md              the Fog switch-over: checklist, open questions, access to request
+FOG.md              running on the Fog: login, what leaves this computer, timings, error reference
 web/            the quiz UI (plain HTML/CSS/JS) and its locally served fonts (web/fonts, SIL OFL 1.1)
 data/quiz.json  traits, questions, answer weights, era profiles (single source of truth)
 data/eras.csv   the server's plaintext model, exported by tools/twin.py

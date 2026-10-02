@@ -115,7 +115,7 @@ class Parse(unittest.TestCase):
         self.assertEqual(meta["upload_bytes"], 20971520)
         self.assertEqual(meta["fog_wait_ms"], 4499)          # "upload complete" -> replay() returned
         self.assertEqual(meta["transport_ms"], meta["upload_ms"])
-        self.assertIsNone(meta["download_ms"], "the transport client does not report it yet")
+        self.assertIsNone(meta["download_ms"], "the transport client reports upload progress only")
 
     def test_fog_timing_degrades_to_none_when_lines_are_missing(self):
         meta = backends.get("fog", BUILD).parse("", "[fog] assigned j-1 -> u\n", [(10, "[fog] assigned j-1 -> u")])

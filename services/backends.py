@@ -12,7 +12,7 @@ Backends:
   sim-full  real-math record -> local replay + bit-for-bit ring-level check against OpenFHE
   fog       hollow record -> replay on the Niobium Fog via `fog submit`   (needs `fog login`)
 
-To add or switch a backend, change this file only. See FOG.md for the Fog switch-over.
+To add or switch a backend, change this file only. See FOG.md for running on the Fog.
 """
 import os
 import re
@@ -80,8 +80,7 @@ class SimBackend(Backend):
     def describe(self):
         return {"id": self.id, "short": "Niobium simulator",
                 "name": "Niobium's FHETCH simulator on this computer",
-                "detail": "It replays the instruction trace this app records for a Fog run, as a local rehearsal "
-                          "(not yet checked against the Fog itself). "
+                "detail": "It replays the instruction trace this app records for a Fog run, as a local rehearsal. "
                           "Fog hardware is not connected in this run.",
                 "where": "Niobium's simulator", "remote": self.remote}
 
@@ -162,11 +161,11 @@ class FogBackend(Backend):
         """Split a Fog run into phases from the timestamped stderr lines.
 
         upload_ms   first upload-progress line -> "upload complete": pure transport, measured.
-        fog_wait_ms "upload complete" -> replay() returned: the Fog's own run PLUS the download of the
-                    result. The transport client does not report when the response started arriving,
-                    so the download cannot be split out of this figure yet (see FOG.md).
+        fog_wait_ms "upload complete" -> replay() returned: the Fog's own run plus the download of the
+                    result. The transport client reports upload progress but not when the response
+                    starts, so the download is counted here.
         fog_queue_ms launch -> worker assigned: `fog submit` provisioning / queue time.
-        transport_ms the measured transport: upload_ms (plus download_ms once it can be measured).
+        transport_ms the measured transport: upload_ms (plus download_ms when a client reports it).
         """
         def first(rx):
             return next((t for t, line in timeline if rx.search(line)), None)
