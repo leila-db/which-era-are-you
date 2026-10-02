@@ -32,6 +32,7 @@ class BackendUnavailable(Exception):
 class Backend:
     id = ""
     remote = False                        # True when ciphertext leaves this machine
+    hollow = False                        # True when era_server must record WITHOUT real math (--hollow)
 
     def __init__(self, build_dir, **_):
         self.server = os.path.join(build_dir, "era_server")
@@ -48,9 +49,13 @@ class Backend:
         """What the UI shows. `name` is bolded; `detail` follows it. Plain text, no HTML."""
         raise NotImplementedError
 
-    def parse(self, stdout, stderr):
-        """Backend-specific facts pulled from era_server's output, merged into the job metadata."""
-        return {"ring_check": RING_CHECK_MARK in (stdout + stderr)}
+    def parse(self, stdout, stderr, timeline=()):
+        """Backend-specific facts pulled from era_server's output, merged into the job metadata.
+        `timeline` is [(ms since launch, stderr line)] in arrival order (compute_service.run_timed).
+
+        transport_ms is the time spent moving ciphertext to and from remote hardware. Local backends
+        never move it, so it is None and the UI shows "n/a"."""
+        return {"ring_check": RING_CHECK_MARK in (stdout + stderr), "transport_ms": None}
 
 
 class CpuBackend(Backend):
@@ -67,6 +72,7 @@ class CpuBackend(Backend):
 
 class SimBackend(Backend):
     id = "sim"
+    hollow = True
 
     def command(self, job_dir):
         return [self.server, job_dir, "--hollow"]
@@ -82,6 +88,7 @@ class SimBackend(Backend):
 
 class SimFullBackend(SimBackend):
     id = "sim-full"
+    hollow = False                        # real math on purpose: it feeds the ring-level identity check
 
     def command(self, job_dir):
         return [self.server, job_dir]      # real-math record: enables the ring-level identity check
@@ -97,6 +104,17 @@ class SimFullBackend(SimBackend):
 class FogBackend(Backend):
     id = "fog"
     remote = True
+    hollow = True                         # the Fog gets a hollow trace; it never needs the real math
+
+    # stderr lines that mark the phases of a `fog submit` run, in the order they appear:
+    #   fog (niobium-client scripts/fog):      "[fog] assigned <job> -> <worker url>"
+    #   nbcc_fhetch_replay (transport client): "[fog] upload <n>/<m> MB (<pct>%)" ... "[fog] upload complete …"
+    #   era_server (app/server.cpp):           "[server] replay done in <ms> ms"
+    ASSIGNED = re.compile(r"^\[fog\] assigned (\S+)")
+    UPLOAD_START = re.compile(r"^\[fog\] upload \d+/\d+ MB")
+    UPLOAD_DONE = re.compile(r"^\[fog\] upload complete")
+    REPLAY_DONE = re.compile(r"^\[server\] replay done")
+    UPLOAD_BYTES = re.compile(r"\[nbcc_fhetch_replay\] POSTing (\d+) bytes")   # stdout, exact size
 
     def __init__(self, build_dir, target=None, **_):
         super().__init__(build_dir)
@@ -133,11 +151,35 @@ class FogBackend(Backend):
                 "detail": f"Fog target {self.target}.", "where": "the Niobium Fog",
                 "remote": self.remote, "target": self.target}
 
-    def parse(self, stdout, stderr):
-        meta = super().parse(stdout, stderr)
-        m = re.search(r"\[fog\] assigned (\S+)", stderr)   # printed by `fog submit` once a worker is assigned
+    def parse(self, stdout, stderr, timeline=()):
+        meta = super().parse(stdout, stderr, timeline)
+        m = self.ASSIGNED.search(stderr) or re.search(r"\[fog\] assigned (\S+)", stderr)
         meta["fog_job"] = m.group(1) if m else None
+        meta.update(self.timing(stdout, timeline))
         return meta
+
+    def timing(self, stdout, timeline):
+        """Split a Fog run into phases from the timestamped stderr lines.
+
+        upload_ms   first upload-progress line -> "upload complete": pure transport, measured.
+        fog_wait_ms "upload complete" -> replay() returned: the Fog's own run PLUS the download of the
+                    result. The transport client does not report when the response started arriving,
+                    so the download cannot be split out of this figure yet (see FOG.md).
+        fog_queue_ms launch -> worker assigned: `fog submit` provisioning / queue time.
+        transport_ms the measured transport: upload_ms (plus download_ms once it can be measured).
+        """
+        def first(rx):
+            return next((t for t, line in timeline if rx.search(line)), None)
+        t_assigned, t_up0, t_up1, t_done = (first(rx) for rx in
+                                            (self.ASSIGNED, self.UPLOAD_START, self.UPLOAD_DONE, self.REPLAY_DONE))
+        upload = round(t_up1 - t_up0) if t_up0 is not None and t_up1 is not None else None
+        m = self.UPLOAD_BYTES.search(stdout)
+        return {"fog_queue_ms": round(t_assigned) if t_assigned is not None else None,
+                "upload_ms": upload,
+                "upload_bytes": int(m.group(1)) if m else None,
+                "download_ms": None,
+                "fog_wait_ms": round(t_done - t_up1) if t_up1 is not None and t_done is not None else None,
+                "transport_ms": upload}
 
 
 BACKENDS = {b.id: b for b in (CpuBackend, SimBackend, SimFullBackend, FogBackend)}

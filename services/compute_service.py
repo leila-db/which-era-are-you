@@ -18,6 +18,7 @@ import http.server
 import json
 import os
 import re
+import select
 import shutil
 import subprocess
 import threading
@@ -40,6 +41,43 @@ def log(msg):
     SEQ[0] += 1
     LOG.append(line)
     print("[compute]", line, flush=True)
+
+
+def run_timed(cmd, cwd, timeout):
+    """subprocess.run(capture_output=True, text=True) plus a timeline: [(ms since launch, line)] for every
+    stderr line in arrival order. stderr is unbuffered in era_server, `fog` and the transport client, so
+    the timestamps are real; that is what lets a Fog run be split into upload / remote run / download.
+    Raises subprocess.TimeoutExpired (after killing the process) like subprocess.run does."""
+    t0 = time.monotonic()
+    p = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    out = []
+    pump = threading.Thread(target=lambda: out.append(p.stdout.read()), daemon=True)
+    pump.start()
+    err, timeline, buf = [], [], b""
+    fd = p.stderr.fileno()
+    try:
+        while True:
+            left = timeout - (time.monotonic() - t0)
+            if left <= 0 or not select.select([fd], [], [], left)[0]:
+                raise subprocess.TimeoutExpired(cmd, timeout)
+            chunk = os.read(fd, 1 << 16)
+            if not chunk:
+                break
+            now = (time.monotonic() - t0) * 1000
+            err.append(chunk)
+            *lines, buf = re.split(rb"[\r\n]", buf + chunk)      # "\r" too: upload progress is one \r-line per %
+            timeline += [(now, ln.decode(errors="replace")) for ln in lines if ln.strip()]
+        if buf.strip():
+            timeline.append(((time.monotonic() - t0) * 1000, buf.decode(errors="replace")))
+        rc = p.wait(timeout=max(1.0, timeout - (time.monotonic() - t0)))
+    except subprocess.TimeoutExpired:
+        p.kill()
+        p.wait()
+        raise
+    finally:
+        pump.join(5)
+    return subprocess.CompletedProcess(cmd, rc, b"".join(out).decode(errors="replace"),
+                                       b"".join(err).decode(errors="replace")), timeline
 
 
 def assert_no_secret_key(home):
@@ -147,8 +185,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             log(f"computing 12 encrypted dot products on {desc['name']}")
             t0 = time.time()
             try:
-                r = subprocess.run(BACKEND.command(job), cwd=job, capture_output=True, text=True,
-                                   timeout=CFG.timeout)
+                r, timeline = run_timed(BACKEND.command(job), job, CFG.timeout)
             except subprocess.TimeoutExpired:
                 log(f"server timed out after {CFG.timeout} s")
                 return self._json(504, {"error": f"scoring took longer than {CFG.timeout} s"})
@@ -164,12 +201,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     summary = json.loads(line)
             with open(os.path.join(job, "ct_result.bin"), "rb") as f:
                 out = f.read()
-            log(f"returned {len(out):,} bytes, still encrypted ({ms:.0f} ms)")
-            meta = {"backend": desc, "server_mode": summary.get("mode", BACKEND.id),
+            mode = summary.get("mode", BACKEND.id)
+            hollow = mode.endswith("-hollow")
+            if BACKEND.hollow and not hollow:
+                log(f"WARNING: expected a hollow recording (--hollow) but era_server reported mode {mode!r}")
+            log(f"returned {len(out):,} bytes, still encrypted ({ms:.0f} ms"
+                + (f", {summary['towers_out']} RNS tower)" if summary.get("towers_out") else ")"))
+            meta = {"backend": desc, "server_mode": mode, "hollow": hollow,
                     "server_ms": round(ms), "bytes_in": len(ct), "bytes_out": len(out),
-                    "ring_dim": summary.get("ring_dim"),
+                    "ring_dim": summary.get("ring_dim"), "towers_out": summary.get("towers_out"),
+                    "replay_ms": summary.get("replay_ms"),
                     "trace_instructions": _trace_count(r.stdout + r.stderr)}
-            meta.update(BACKEND.parse(r.stdout, r.stderr))
+            meta.update(BACKEND.parse(r.stdout, r.stderr, timeline))
+            if meta.get("transport_ms") is not None:
+                log("transport: " + ", ".join(f"{k} {v:,} ms" for k, v in (
+                    ("queue", meta.get("fog_queue_ms")), ("upload", meta.get("upload_ms")),
+                    ("remote run + download", meta.get("fog_wait_ms"))) if v is not None))
             return self._send(200, out, "application/octet-stream", {"X-Era-Meta": json.dumps(meta)})
         finally:
             if not CFG.keep_jobs:

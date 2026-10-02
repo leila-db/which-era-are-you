@@ -67,9 +67,11 @@ Warning: `./run_test.sh` with no flag and no API key prints "No Fog API key foun
 
 Everything below has only been checked offline. Until it has run against a live Fog, don't treat it as proven.
 
+- **The hollow trace is what the Fog gets.** `fog submit era_server <job> --hollow --target=…`: era_server reports its mode as `fog-hollow`, and the compute service logs a WARNING if a backend that must be hollow (sim, fog) ever reports otherwise. Unit-tested offline; not yet seen on a live Fog.
 - **A real `fog submit` round trip** from this app. The command line matches niobium-client's docs and is unit-tested, but it has never run against a Fog worker.
 - **Fog job-ID display.** The job ID is read from the `[fog] assigned <id> -> …` line that `fog submit` prints (niobium-client `scripts/fog`). If the format differs, only the job-ID label goes missing. The quiz still works.
 - **Latency.** Each quiz is one Fog job. Queue time comes on top of the compute time. If a run takes more than 5 seconds, the page shows "Still working (N s)…", so a slow run doesn't look frozen. Timeouts: `fog submit` waits up to `FOG_JOB_MAXWAIT` seconds for a worker (default 600), and the compute service gives up after `--timeout` seconds (default 900).
+- **Transport timing.** The result page shows a "transport" time for a Fog run. The compute service timestamps the transport client's own `[fog] upload …` progress lines on stderr, so **upload** is measured. The **download** is not: `nbcc_fhetch_replay` does not report when the worker's response started arriving, so the download is inside the "remote run plus download" figure (from `[fog] upload complete` to era_server's `[server] replay done`). Splitting it out needs one extra stderr line in niobium-client `src/fhetch_transport/client.cpp` (time to first response byte); `FogBackend.timing()` already has a `download_ms` slot for it. Local backends show transport "n/a". The queue figure is launch to `[fog] assigned`.
 - **Batch vs persistent jobs.** The `fog` CLI supports `FOG_JOB_MODE=batch|persistent` (default batch). Whether persistent mode would cut per-quiz latency for a live demo is a question for Niobium. The app doesn't depend on it.
 
 ## If a Fog step fails: what to ask Niobium for
